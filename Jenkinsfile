@@ -1,10 +1,11 @@
 pipeline {
-    agent any
+    // Run this pipeline on a specific Jenkins agent that is an EC2 instance with an IAM role.
+    // Ensure you label your agent 'aws-ec2-agent' in Jenkins's node configuration.
+    agent { label 'aws-ec2-agent' }
 
     environment {
         // IDs of credentials stored securely in Jenkins Credentials Manager
         DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
-        AWS_CREDENTIALS_ID       = 'aws-credentials'
 
         // --- IMPORTANT: CHANGE THESE TWO VALUES ---
         DOCKER_IMAGE_NAME = 'yourdockerhubusername/my-cicd-app' // Use your DockerHub username
@@ -40,34 +41,33 @@ pipeline {
 
         stage('3. Provision Infrastructure (Terraform)') {
             steps {
-                withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
-                    dir('infra') {
-                        echo "Initializing Terraform..."
-                        sh 'terraform init -input=false'
-                        echo "Planning and Applying infrastructure changes..."
-                        sh 'terraform apply -auto-approve -input=false'
-                    }
+                // The withCredentials wrapper for AWS is removed.
+                // The pipeline will now automatically use the IAM Role from the EC2 agent.
+                dir('infra') {
+                    echo "Initializing Terraform..."
+                    sh 'terraform init -input=false'
+                    echo "Planning and Applying infrastructure changes..."
+                    sh 'terraform apply -auto-approve -input=false'
                 }
             }
         }
 
         stage('4. Deploy to Kubernetes') {
             steps {
-                withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
-                    script {
-                        echo "Updating Kubernetes manifests with new image tag: ${env.IMAGE_TAG}"
-                        // This command replaces the placeholder with the actual build number
-                        sh "sed -i 's|__IMAGE_TAG__|${env.IMAGE_TAG}|g' k8s/deployment.yaml"
+                // The withCredentials wrapper for AWS is removed here as well.
+                script {
+                    echo "Updating Kubernetes manifests with new image tag: ${env.IMAGE_TAG}"
+                    // This command replaces the placeholder with the actual build number
+                    sh "sed -i 's|__IMAGE_TAG__|${env.IMAGE_TAG}|g' k8s/deployment.yaml"
 
-                        echo "Connecting to EKS cluster..."
-                        sh "aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}"
-                        
-                        echo "Applying manifests to the cluster..."
-                        sh "kubectl apply -f k8s/"
-                        
-                        echo "Waiting for deployment rollout to complete..."
-                        sh "kubectl rollout status deployment/my-app-deployment --timeout=120s"
-                    }
+                    echo "Connecting to EKS cluster..."
+                    sh "aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}"
+                    
+                    echo "Applying manifests to the cluster..."
+                    sh "kubectl apply -f k8s/"
+                    
+                    echo "Waiting for deployment rollout to complete..."
+                    sh "kubectl rollout status deployment/my-app-deployment --timeout=120s"
                 }
             }
         }
