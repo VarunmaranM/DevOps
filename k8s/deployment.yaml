@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-deployment
+  labels:
+    app: my-app
+spec:
+  replicas: 2 # Run two copies of our application for high availability
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app-container
+        # IMPORTANT: Jenkins will replace __IMAGE_TAG__ with the real build number
+        image: yourdockerhubusername/my-cicd-app:__IMAGE_TAG__
+        ports:
+        - containerPort: 8080
+        env:
+        - name: BUILD_TAG
+          value: "__IMAGE_TAG__" # Pass the build tag to the running application
+        # Health check to see if the app is ready to receive traffic
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+

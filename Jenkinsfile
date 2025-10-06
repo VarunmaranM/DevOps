@@ -1,0 +1,84 @@
+pipeline {
+    agent any
+
+    environment {
+        // IDs of credentials stored securely in Jenkins Credentials Manager
+        DOCKERHUB_CREDENTIALS_ID = 'dockerhub-credentials'
+        AWS_CREDENTIALS_ID       = 'aws-credentials'
+
+        // --- IMPORTANT: CHANGE THESE TWO VALUES ---
+        DOCKER_IMAGE_NAME = 'yourdockerhubusername/my-cicd-app' // Use your DockerHub username
+        AWS_REGION        = 'us-east-1' // Or your preferred AWS region
+        // --- --- --- --- --- --- --- --- --- --- ---
+
+        EKS_CLUSTER_NAME  = 'my-app-cluster'
+    }
+
+    stages {
+        stage('1. Checkout Code') {
+            steps {
+                echo 'Checking out the latest code from Git...'
+                checkout scm
+            }
+        }
+
+        stage('2. Build and Push Docker Image') {
+            steps {
+                script {
+                    env.IMAGE_TAG = "${BUILD_NUMBER}"
+                    echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
+                    sh "docker build -t ${DOCKER_IMAGE_NAME}:${env.IMAGE_TAG} ./app"
+
+                    withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS_ID, usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        echo "Logging into DockerHub and pushing image..."
+                        sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
+                        sh "docker push ${DOCKER_IMAGE_NAME}:${env.IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+        stage('3. Provision Infrastructure (Terraform)') {
+            steps {
+                withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
+                    dir('infra') {
+                        echo "Initializing Terraform..."
+                        sh 'terraform init -input=false'
+                        echo "Planning and Applying infrastructure changes..."
+                        sh 'terraform apply -auto-approve -input=false'
+                    }
+                }
+            }
+        }
+
+        stage('4. Deploy to Kubernetes') {
+            steps {
+                withCredentials([aws(credentialsId: AWS_CREDENTIALS_ID)]) {
+                    script {
+                        echo "Updating Kubernetes manifests with new image tag: ${env.IMAGE_TAG}"
+                        // This command replaces the placeholder with the actual build number
+                        sh "sed -i 's|__IMAGE_TAG__|${env.IMAGE_TAG}|g' k8s/deployment.yaml"
+
+                        echo "Connecting to EKS cluster..."
+                        sh "aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER_NAME}"
+                        
+                        echo "Applying manifests to the cluster..."
+                        sh "kubectl apply -f k8s/"
+                        
+                        echo "Waiting for deployment rollout to complete..."
+                        sh "kubectl rollout status deployment/my-app-deployment --timeout=120s"
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        // This block runs after all stages, regardless of success or failure
+        always {
+            echo 'Pipeline finished. Cleaning up workspace...'
+            cleanWs() // Deletes all files from the Jenkins workspace for the next run
+        }
+    }
+}
+

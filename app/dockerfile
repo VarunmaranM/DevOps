@@ -1,0 +1,28 @@
+# ---- Base Stage ----
+# Use an official Python runtime as a parent image.
+# Using a specific version ensures repeatable builds.
+FROM python:3.9-slim-buster AS base
+
+# Set the working directory in the container
+WORKDIR /app
+
+# Copy the requirements file and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# ---- Final Stage ----
+# This is the final, lean image we will use
+FROM base
+
+# Copy the application code from the base stage
+COPY main.py .
+
+# Expose port 8080 to the outside world
+EXPOSE 8080
+
+# Environment variable that will be populated by Kubernetes
+ENV BUILD_TAG="local-tag"
+
+# Command to run the application using a production-ready server
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "main:app"]
+
